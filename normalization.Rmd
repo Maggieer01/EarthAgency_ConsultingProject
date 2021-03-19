@@ -1,0 +1,427 @@
+---
+title: "Normalization"
+author: "Maggie Sha"
+date: "3/18/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(plyr)
+```
+
+```{r echo=FALSE}
+adult <- read.csv("EarthAgency_Adults_R.csv", header = TRUE)
+
+children <- read.csv("EarthAgency_Children_R.csv", header = TRUE)
+
+
+adult_df <- adult %>%
+
+  dplyr::select(
+
+    Condition,
+
+    Agency_Language,
+
+    SRFactsTotal,
+
+    invitalscore,
+
+    inpsychscore,
+
+    MeanSever,
+
+    BioJtscore,
+
+    AntJtscore,
+
+    BioJFtotal,
+
+    FirstLang,
+
+    Age
+
+  ) %>%
+
+  mutate(
+
+    Condition = as.factor(Condition),
+
+    SRFactsTotal = as.integer(SRFactsTotal),
+
+    invitalscore = as.integer(invitalscore),
+
+    inpsychscore = as.integer(inpsychscore),
+
+    Agency_Language = as.factor(Agency_Language),
+
+    FirstLang = as.factor(FirstLang),
+
+    Age
+
+  )
+
+
+
+
+
+
+
+#compress scores to match invitalscore and inpsychscore for children
+# 
+# adult_df$invitalscore[which(adult_df$invitalscore==0 | adult_df$invitalscore==1)]<-0
+# 
+# adult_df$invitalscore[which(adult_df$invitalscore==2) ]<-1
+# 
+# adult_df$invitalscore[which(adult_df$invitalscore==3) ]<-2
+# 
+# adult_df$invitalscore[which(adult_df$invitalscore==4 | adult_df$invitalscore==5)]<-3
+# 
+# 
+# 
+# adult_df$inpsychscore[which(adult_df$inpsychscore==2 | adult_df$inpsychscore==3)]<-2
+# 
+# adult_df$inpsychscore[which(adult_df$inpsychscore==4)]<-3
+# 
+# adult_df$inpsychscore[which(adult_df$inpsychscore==5)]<-4
+
+
+
+child_df <- children %>%
+
+  dplyr::select(
+
+    Condition,
+
+    Agency_Language,
+
+    SRFactsTotal,
+
+    invitalscore,
+
+    inpsychscore,
+
+    MeanSever,
+
+    BioJtscore,
+
+    AntJtscore,
+
+    BioJFtotal,
+
+    Age
+
+  ) %>%
+
+  mutate(
+
+    Condition = as.factor(Condition),
+
+    SRFactsTotal = as.integer(SRFactsTotal),
+
+    invitalscore = as.integer(invitalscore),
+
+    inpsychscore = as.integer(inpsychscore),
+
+    Agency_Language = as.factor(Agency_Language),
+
+    Age 
+
+  )
+
+
+
+# 1 = speaking English as their first language
+
+FirstLang <- rep(1, nrow(child_df))
+
+child_df <- child_df %>% 
+
+  mutate(
+
+    FirstLang = as.factor(FirstLang),
+
+    )
+
+
+
+
+# invitalscore normalization
+adult_min <- min(adult_df$inpsychscore)
+adult_max <- max(adult_df$inpsychscore)
+child_min <- min(child_df$inpsychscore)
+child_max <- max(child_df$inpsychscore)
+adult_df$normalized_inpsychscore <- (adult_df$inpsychscore - adult_min)/(adult_max - adult_min)
+child_df$normalized_inpsychscore <- (child_df$inpsychscore - child_min)/(child_max - child_min)
+
+
+# invitalscore normalization
+adult_min2 <- min(adult_df$invitalscore)
+adult_max2 <- max(adult_df$invitalscore)
+child_min2 <- min(child_df$invitalscore)
+child_max2 <- max(child_df$invitalscore)
+adult_df$normalized_invitalscore <- (adult_df$invitalscore - adult_min2)/(adult_max2 - adult_min2)
+child_df$normalized_invitalscore <- (child_df$invitalscore - child_min2)/(child_max2 - child_min2)
+
+
+#To take care of the one errant entry, children[87] (mean severity scores are divided by 4 so .67 is not possible…)
+
+child_df$MeanSever[child_df$MeanSever==2.67] <- 2.5
+
+
+
+#To remove children[41] which has no BIoJtscore or AntJtscore
+
+#To remove children[45] which has no Agency_Language or SRFactsTotal
+
+child_df <- na.omit(child_df)
+
+
+
+## COMBINING children and adult into one data.frame
+
+AC_df <- rbind(adult_df, child_df)
+
+
+
+#Giving factor levels cleaner language
+
+AC_df$Condition <- revalue(AC_df$Condition, c("1"="Obj", "2"="Nat", "3"="Per"))
+
+AC_df$Agency_Language <- revalue(AC_df$Agency_Language, c("0"="Obj", "2"="Nat", "3"="Per"))
+
+AC_df$Age <- ifelse(AC_df$Age > 10, "Adult", "Child")
+
+AC_df$Age <- factor(AC_df$Age)
+```
+
+
+
+# 1. Mean Severity Ordinal model with combined levels (bcm)
+```{r message=FALSE}
+#Meansever combined into three levels (bcm)
+AC_df$comMeanSever <- AC_df$MeanSever
+AC_df$comMeanSever[which((AC_df$MeanSever < 1.5))]<-1
+AC_df$comMeanSever[which((AC_df$MeanSever > 1.25 & AC_df$MeanSever < 2.25))]<-2
+AC_df$comMeanSever[which((AC_df$MeanSever > 2))]<-3
+AC_df$comMeanSever <- factor(AC_df$comMeanSever, ordered = TRUE)
+
+table(AC_df$MeanSever)
+table(AC_df$comMeanSever)
+
+plor.fit1c <- polr(comMeanSever ~  Condition + Agency_Language + SRFactsTotal + 
+                     normalized_invitalscore  + normalized_inpsychscore + FirstLang+Age, data = AC_df)
+#summary(plor.fit1c)
+
+#Get p-value
+ctable <- round(coef(summary(plor.fit1c)), 3)
+p <- pnorm(abs(ctable[, "t value"]), lower.tail = FALSE) * 2
+ctable1 <- cbind(ctable, "p value" =round(p, 3))
+ctable1
+
+#Compute confusion table and misclassification error
+fitted <- predict(plor.fit1c)
+n <- table(AC_df$comMeanSever, fitted)
+prop.correct <- c(n[1,1]/sum(n[1,]),n[2,2]/sum(n[2,]),n[3,3]/sum(n[3,]))
+prop.correct <- round(100*prop.correct, 0)
+rbind(n,prop.correct)
+ME <- mean(as.character(AC_df$comMeanSever) !=as.character(fitted))
+cat("Misclassification error is:",ME,"\n")
+```
+
+
+# 2. Biocentric Justification score, Ordinal model with combined levels (bcm)
+```{r message=FALSE}
+#BioJtscore with Combination (bcm)
+AC_df$comBioJtscore<-AC_df$BioJtscore
+AC_df$comBioJtscore[which((AC_df$comBioJtscore==0))]<-1
+AC_df$comBioJtscore[which((AC_df$comBioJtscore==2))]<-1
+AC_df$comBioJtscore[which((AC_df$comBioJtscore==3))]<-2
+AC_df$comBioJtscore[which((AC_df$comBioJtscore==4))]<-3
+AC_df$comBioJtscore<- factor(AC_df$comBioJtscore, ordered = TRUE)
+
+table(AC_df$BioJtscore)
+table(AC_df$comBioJtscore)
+
+plor.fit2c <- polr(comBioJtscore ~  Condition + Agency_Language + 
+                     SRFactsTotal + normalized_invitalscore  + normalized_inpsychscore + FirstLang + Age, data = AC_df)
+#summary(plor.fit2c)
+
+#Get p-value
+ctable <- round(coef(summary(plor.fit2c)), 3)
+p <- pnorm(abs(ctable[, "t value"]), lower.tail = FALSE) * 2
+ctable1 <- cbind(ctable, "p value" = round(p, 3))
+ctable1
+
+#Compute confusion table and misclassification error
+fitted <- predict(plor.fit2c)
+n <- table(AC_df$comBioJtscore, fitted)
+prop.correct <- c(n[1,1]/sum(n[1,]),n[2,2]/sum(n[2,]),n[3,3]/sum(n[3,]))
+prop.correct <- round(100*prop.correct, 0)
+rbind(n,prop.correct)
+ME <- mean(as.character(AC_df$comBioJtscore) !=as.character(fitted))
+cat("Misclassification error is:",ME,"\n")
+```
+
+
+
+# 3. Anthropocentric Justification score, Ordinal model with combined levels (bcm)
+```{r message=FALSE}
+#AntJtscore with Combination (bcm)
+AC_df$comAntJtscore<-AC_df$AntJtscore
+AC_df$comAntJtscore[which((AC_df$comAntJtscore==0))]<-1
+AC_df$comAntJtscore[which((AC_df$comAntJtscore==2))]<-1
+AC_df$comAntJtscore[which((AC_df$comAntJtscore==3))]<-2
+AC_df$comAntJtscore[which((AC_df$comAntJtscore==4))]<-3
+AC_df$comAntJtscore<- factor(AC_df$comAntJtscore, ordered = TRUE)
+
+table(AC_df$AntJtscore)
+table(AC_df$comAntJtscore)
+
+plor.fit3c<- polr(comAntJtscore~  Condition + Agency_Language + SRFactsTotal + 
+                    normalized_invitalscore  + normalized_inpsychscore + FirstLang + Age, data = AC_df)
+#summary(plor.fit3c)
+
+#Get p-value
+ctable <- round(coef(summary(plor.fit3c)), 3)
+p <- pnorm(abs(ctable[, "t value"]), lower.tail = FALSE) * 2
+ctable1 <- cbind(ctable, "p value" = round(p, 3))
+ctable1
+
+#Compute confusion table and misclassification error
+fitted <- predict(plor.fit3c)
+n <- table(AC_df$comAntJtscore, fitted)
+prop.correct <- c(n[1,1]/sum(n[1,]),n[2,2]/sum(n[2,]),n[3,3]/sum(n[3,]))
+prop.correct <- round(100*prop.correct, 0)
+rbind(n,prop.correct)
+ME <- mean(as.character(AC_df$comAntJtscore) !=as.character(fitted))
+cat("Misclassification error is:",ME,"\n")
+```
+
+
+# 4. Biocentric choice score, Ordinal model with combined levels (bcm)
+```{r message=FALSE}
+#BioJFtotal with Combination
+AC_df$comBioJFtotal<-AC_df$BioJFtotal
+AC_df$comBioJFtotal[which((AC_df$comBioJFtotal==0))]<-1
+#AC_df$comBioJFtotal[which((AC_df$comBioJFtotal==2))]<-1
+#AC_df$comBioJFtotal[which((AC_df$comBioJFtotal==3))]<-2
+AC_df$comBioJFtotal[which((AC_df$comBioJFtotal==4))]<-3
+AC_df$comBioJFtotal<- factor(AC_df$comBioJFtotal, ordered = TRUE)
+
+table(AC_df$BioJFtotal)
+table(AC_df$comBioJFtotal)
+
+plor.fit4c <- polr(comBioJFtotal ~  Condition + Agency_Language + SRFactsTotal + 
+                     normalized_invitalscore  + normalized_inpsychscore + FirstLang + Age, data = AC_df)
+#summary(plor.fit4c)
+
+#Get p-value
+ctable <- round(coef(summary(plor.fit4c)), 3)
+p <- pnorm(abs(ctable[, "t value"]), lower.tail = FALSE) * 2
+ctable1 <- cbind(ctable, "p value" = round(p, 3))
+ctable1
+
+#Compute confusion table and misclassification error
+fitted <- predict(plor.fit4c)
+n <- table(AC_df$comBioJFtotal, fitted)
+prop.correct <- c(n[1,1]/sum(n[1,]),n[2,2]/sum(n[2,]),n[3,3]/sum(n[3,]))
+prop.correct <- round(100*prop.correct, 0)
+rbind(n,prop.correct)
+ME <- mean(as.character(AC_df$comBioJFtotal) !=as.character(fitted))
+cat("Misclassification error is:",ME,"\n")
+```
+
+# 5. Anova test comparing Age
+```{r}
+#Mean Severity
+plor.fit1c2 <- polr(comMeanSever ~  Condition + Agency_Language + 
+                      SRFactsTotal + normalized_invitalscore  + normalized_inpsychscore + FirstLang, data = AC_df)
+
+anova(plor.fit1c, plor.fit1c2)
+
+
+#Biocentric Justification score
+plor.fit2c2 <- polr(comBioJtscore ~  Condition + Agency_Language + 
+                      SRFactsTotal + normalized_invitalscore  + normalized_inpsychscore + FirstLang, data = AC_df)
+
+anova(plor.fit2c, plor.fit2c2)
+
+
+#Anthropocentric Justification score
+plor.fit3c2<- polr(comAntJtscore ~ Condition + Agency_Language + 
+                     SRFactsTotal + normalized_invitalscore  + normalized_inpsychscore + FirstLang, data = AC_df)
+
+anova(plor.fit3c,plor.fit3c2)
+
+
+#Biocentric choice score
+plor.fit4c2 <- polr(comBioJFtotal ~  Condition + Agency_Language + SRFactsTotal + 
+                      normalized_invitalscore  + normalized_inpsychscore + FirstLang, data = AC_df)
+
+anova(plor.fit4c,plor.fit4c2)
+```
+
+
+# 6. Anova test comparing Condition
+```{r}
+#Mean Severity
+plor.fit1c2 <- polr(comMeanSever ~ Age + Agency_Language + 
+                      SRFactsTotal + normalized_invitalscore  + normalized_inpsychscore + FirstLang, data = AC_df)
+
+anova(plor.fit1c, plor.fit1c2)
+
+
+#Biocentric Justification score
+plor.fit2c2 <- polr(comBioJtscore ~  Age + Agency_Language + 
+                      SRFactsTotal + normalized_invitalscore  + normalized_inpsychscore + FirstLang, data = AC_df)
+
+anova(plor.fit2c, plor.fit2c2)
+
+
+#Anthropocentric Justification score
+plor.fit3c2<- polr(comAntJtscore ~ Age + Agency_Language + 
+                     SRFactsTotal + normalized_invitalscore  + normalized_inpsychscore + FirstLang, data = AC_df)
+
+anova(plor.fit3c,plor.fit3c2)
+
+
+#Biocentric choice score
+plor.fit4c2 <- polr(comBioJFtotal ~ Age + Agency_Language + SRFactsTotal + 
+                      normalized_invitalscore  + normalized_inpsychscore + FirstLang, data = AC_df)
+
+anova(plor.fit4c,plor.fit4c2)
+```
+
+
+# 7. Anova test comparing normalization
+```{r}
+#Mean Severity
+plor.fit1c2 <- polr(comMeanSever ~ Condition + Age + Agency_Language + 
+                      SRFactsTotal + invitalscore  + inpsychscore + FirstLang, data = AC_df)
+
+anova(plor.fit1c, plor.fit1c2)
+
+
+#Biocentric Justification score
+plor.fit2c2 <- polr(comBioJtscore ~  Condition + Age + Agency_Language + 
+                      SRFactsTotal + invitalscore  + normalized_inpsychscore + FirstLang, data = AC_df)
+
+anova(plor.fit2c, plor.fit2c2)
+
+
+#Anthropocentric Justification score
+plor.fit3c2<- polr(comAntJtscore ~ Condition + Age + Agency_Language + 
+                     SRFactsTotal + invitalscore  + inpsychscore + FirstLang, data = AC_df)
+
+anova(plor.fit3c,plor.fit3c2)
+
+
+#Biocentric choice score
+plor.fit4c2 <- polr(comBioJFtotal ~ Condition + Age + Agency_Language + SRFactsTotal + 
+                      invitalscore  + inpsychscore + FirstLang, data = AC_df)
+
+anova(plor.fit4c,plor.fit4c2)
+```
